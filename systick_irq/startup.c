@@ -13,11 +13,10 @@ __asm__ volatile(" BL main\n");					// call main
 __asm__ volatile(".L1: B .L1\n");				// never return
 }
 
-
                 // -- Definitions -- //
-
-
-// Port Definition Adresses
+                
+                
+// Port Definition Adresses 
 #define GPIO_D          ((volatile unsigned int   *) 0x40020C00)
 #define GPIO_D_MODER    ((volatile unsigned int   *) GPIO_D + 0x0) 
 #define GPIO_D_OTYPER   ((volatile unsigned int   *) GPIO_D + 0x4) 
@@ -47,83 +46,74 @@ __asm__ volatile(".L1: B .L1\n");				// never return
 
 // Global Variables
 // * Status
-static int systick_flag;
-static int delay_count;
+static volatile int systick_flag;
+static volatile int delay_count;
+
+// * Function
+void systick_irq_handler(void);
 
 
-                // -- Functions -- //
+        // -- Functions -- //
 
-
-// Function to configure ports and initialize exception vector table
+// Function to configure ports and initialize vector tables
 void init_app(void)
 {
     *GPIO_D_MODER = 0x55555555;
-    *SCB_VTOR      = 0x2001C000;
-    *((void (**)(void)) *SCB_VTOR + 0x0000003C) = systick_irq_handler();
+    *SCB_VTOR = 0x2001C000;
+    *((void(**)(void)) SCB_VTOR+0x0000003C) = systick_irq_handler;
 }
 
-
+// Function to delay 1 microsecond
 void delay_1mikro(void)
 {
-    // Guarantee flag isn't set
-    systick_flag = 0;
-    
-    // Delay Routine (0xA8 = 168)
-    *STK_CTRL = 0;      // Reset SysTick
-    *STK_LOAD = 0xA8-1; // Load value (N clockcycles is given by countvalue N-1)
-    *STK_VAL  = 0;      // Reset counter
-    *STK_CTRL = 7;      // Prepare SysTick 
-                        // * (STK_LOAD to STK_VAL)
-                        // * Exception generated when STK_VAL = 0
-    
+    *STK_CTRL = 0;         // Reset SysTick
+    *STK_LOAD = (168 - 1); // CountValue
+    *STK_VAL = 0;          // Reset Counter
+    *STK_CTRL = 7;         // Prepare SysTick
+                           // * STK_LOAD -> STK_VAL
+                           // * Generate Exception on Count 0
 }
 
+// Function to Handle SysTick Exception
+void systick_irq_handler(void)
+{
+    *STK_CTRL = 0;          // Reset Counter
+    delay_count -- ;        // Count Down
+    if(delay_count > 0)      
+        {
+            delay_1mikro();
+        }
+    else 
+        {
+            systick_flag = 1;
+        }
+}
+
+// Function to delay
 void delay(unsigned int count)
 {
+    if(count == 0)
+    {
+        return;
+    }
     delay_count = count;
+    systick_flag = 0;
     delay_1mikro();
 }
 
-// Function to handle systick exception request
-void systick_irq_handler(void)
-{
-    // Reset Counter Circuit
-     *STK_CTRL = 0;
-    
-    // Countdown
-    // * When we reach 0 -> set flag to 1 to notify main program
-    delay_count = delay_count - 1;
-    
-    if (delay_count > 0)
-    {
-        delay_1mikro();
-    }
-    else
-    {
-        systick_flag = 1;
-    }
-     
-}
-
-
+// Main Function
 void main(void)
 {
     init_app();
-    *GPIO_D_ODR_LOW = 0x00;     // Set output to 0x0 
-    delay(DELAY_COUNT);      // Initiate separate counter
-    *GPIO_D_ODR_LOW = 0xFF;  // Set output to 0xFF
-    
-    // Code to be executed while separate counter runs
-    // * Runs until exception is generated -> set systick_flag = 1 -> Specific Exception Routine
+    *GPIO_D_ODR_LOW = 0;
+    delay(DELAY_COUNT);
+    *GPIO_D_ODR_LOW = 0xFF;
     while(1)
     {
-        if (systick_flag)
+        if(systick_flag)
         {
             break;
         }
-        // Waiting Code
     }
-    // Code that runs on timeout
     *GPIO_D_ODR_LOW = 0;
 }
-
